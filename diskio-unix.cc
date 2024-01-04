@@ -28,6 +28,9 @@
 #ifdef __linux__
 #include "linux/hdreg.h"
 #endif
+#ifdef __HAIKU__
+#include <Drivers.h>
+#endif
 
 #include <iostream>
 #include <fstream>
@@ -37,7 +40,7 @@
 
 using namespace std;
 
-#if defined(__APPLE__) || defined(__linux__)
+#if defined(__APPLE__) || defined(__linux__) || defined(__HAIKU__)
 #define off64_t off_t
 #define stat64 stat
 #define fstat64 fstat
@@ -86,7 +89,7 @@ int DiskIO::OpenForRead(void) {
             if (S_ISDIR(st.st_mode))
                cerr << "The specified path is a directory!\n";
 #if !(defined(__FreeBSD__) || defined(__FreeBSD_kernel__)) \
-                       && !defined(__APPLE__)
+                       && !defined(__APPLE__) && !defined(__HAIKU__)
             else if (S_ISCHR(st.st_mode))
                cerr << "The specified path is a character device!\n";
 #endif
@@ -180,6 +183,12 @@ int DiskIO::GetBlockSize(void) {
 #ifdef __linux__
       err = ioctl(fd, BLKSSZGET, &blockSize);
 #endif
+#ifdef __HAIKU__
+      device_geometry geometry;
+      err = ioctl(fd, B_GET_GEOMETRY, &geometry, sizeof(geometry));
+      if (err == 0)
+          blockSize = geometry.bytes_per_sector;
+#endif
 
       if (err == -1) {
          blockSize = SECTOR_SIZE;
@@ -212,6 +221,11 @@ int DiskIO::GetPhysBlockSize(void) {
    if (isOpen) {
 #if defined __linux__ && !defined(EFI)
       err = ioctl(fd, BLKPBSZGET, &physBlockSize);
+#elif defined __HAIKU__
+      device_geometry geometry;
+      err = ioctl(fd, B_GET_GEOMETRY, &geometry, sizeof(geometry));
+      if (err == 0)
+          physBlockSize = geometry.bytes_per_physical_sector;
 #endif
    } // if (isOpen)
    if (err == -1)
@@ -233,6 +247,10 @@ uint32_t DiskIO::GetNumHeads(void) {
 
    if (!ioctl(fd, HDIO_GETGEO, &geometry))
       numHeads = (uint32_t) geometry.heads;
+#elif defined __HAIKU__
+      device_geometry geometry;
+      if (!ioctl(fd, B_GET_GEOMETRY, &geometry, sizeof(geometry)))
+          numHeads = geometry.head_count;
 #endif
    return numHeads;
 } // DiskIO::GetNumHeads();
@@ -251,6 +269,10 @@ uint32_t DiskIO::GetNumSecsPerTrack(void) {
 
    if (!ioctl(fd, HDIO_GETGEO, &geometry))
       numSecs = (uint32_t) geometry.sectors;
+   #elif defined __HAIKU__
+      device_geometry geometry;
+      if (!ioctl(fd, B_GET_GEOMETRY, &geometry, sizeof(geometry)))
+          numSecs = geometry.sectors_per_track;
    #endif
    return numSecs;
 } // DiskIO::GetNumSecsPerTrack()
@@ -403,7 +425,7 @@ int DiskIO::Write(void* buffer, int numBytes) {
          cerr << "Unable to allocate memory in DiskIO::Write()! Terminating!\n";
          exit(1);
       } // if
-      
+
       // Copy the data to my own buffer, then write it
       memcpy(tempSpace, buffer, numBytes);
       for (i = numBytes; i < numBlocks * blockSize; i++) {
@@ -483,6 +505,14 @@ uint64_t DiskIO::DiskSize(int *err) {
       // Unintuitively, the above returns values in 512-byte blocks, no
       // matter what the underlying device's block size. Correct for this....
       sectors /= (GetBlockSize() / 512);
+      platformFound++;
+#endif
+#ifdef __HAIKU__
+      device_geometry geometry;
+      *err = ioctl(fd, B_GET_GEOMETRY, &geometry, sizeof(geometry));
+      if (*err == 0)
+          sectors = 1LL * geometry.head_count * geometry.cylinder_count
+			        * geometry.sectors_per_track;
       platformFound++;
 #endif
       if (platformFound != 1)

@@ -23,7 +23,7 @@
 #include <iostream>
 #include <string>
 #include <sstream>
-#if defined (__APPLE__) || (__FreeBSD__)
+#if defined (__APPLE__) || (__FreeBSD__) || (__HAIKU__)
 #include <ncurses.h>
 #else
 #include <ncursesw/ncurses.h>
